@@ -12,6 +12,7 @@
 - Queues available
 - Multi chats supported
 
+[![Render](https://img.shields.io/badge/Deploy-Render-46E3B7?style=for-the-badge&logo=render&logoColor=black)](https://render.com/deploy?repo=https://github.com/thelordmuruka01/47MusicPlayerBot)
 
 ## ✨ Heroku Deploy
 - Fork the repo and change template link in heroku deploy button to forked repo link (else you will not able to deploy)
