@@ -4,6 +4,8 @@ import asyncio
 import logging
 import threading
 import subprocess
+import shutil
+import tempfile
 from flask import Flask
 from pyrogram import Client, filters, enums
 from pyrogram.types import (
