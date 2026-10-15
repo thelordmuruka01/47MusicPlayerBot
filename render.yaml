@@ -9,6 +9,9 @@ services:
     startCommand: "python app.py"
 
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.13
+        
       - key: API_ID
         sync: false
 
