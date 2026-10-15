@@ -4,7 +4,6 @@ import asyncio
 import logging
 import threading
 import subprocess
-
 from flask import Flask
 from pyrogram import Client, filters, enums
 from pyrogram.types import (
@@ -203,76 +202,97 @@ async def safe_delete(message):
         pass
 
 
+
 async def extract_stream_url(link, video=False):
-    """
-    Extract a direct stream URL using yt-dlp.
-    Returns (success, result).
-    Supports an optional YouTube cookies file.
-    """
+    """Extract a stream URL with writable temporary cookies."""
 
-    if video:
-        format_selector = "best[height<=720]/best"
-    else:
-        format_selector = "bestaudio/best"
-
-    command = [
-        "yt-dlp",
-        "--no-warnings",
-        "--no-playlist",
-    ]
-
-    # Add cookies when the file exists
-    if os.path.isfile(YOUTUBE_COOKIES_FILE):
-        command.extend([
-            "--cookies",
-            YOUTUBE_COOKIES_FILE,
-        ])
-        LOGGER.info("YouTube cookies file found; using cookies.")
-    else:
-        LOGGER.warning(
-            "YouTube cookies file not found: %s",
-            YOUTUBE_COOKIES_FILE,
-        )
-
-    command.extend([
-        "--format",
-        format_selector,
-        "--get-url",
-        link,
-    ])
+    format_selector = (
+        "best[height<=720]/best" if video else "bestaudio/best"
+    )
+    temp_dir = None
 
     try:
+        command = [
+            "yt-dlp",
+            "--no-warnings",
+            "--no-playlist",
+        ]
+
+        if os.path.isfile(YOUTUBE_COOKIES_FILE):
+            temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
+            writable_cookies = os.path.join(temp_dir, "cookies.txt")
+            shutil.copyfile(YOUTUBE_COOKIES_FILE, writable_cookies)
+
+            command.extend(["--cookies", writable_cookies])
+            LOGGER.info("YouTube cookies copied to writable temporary file.")
+        else:
+            LOGGER.warning("YouTube cookies file not found: %s", YOUTUBE_COOKIES_FILE)
+
+        command.extend([
+            "--format", format_selector,
+            "--get-url", link,
+        ])
+
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-
         stdout, stderr = await process.communicate()
 
         if process.returncode == 0 and stdout.strip():
-            url = stdout.decode(
-                "utf-8",
-                errors="replace",
+            return True, stdout.decode(
+                "utf-8", errors="replace"
             ).splitlines()[0]
 
-            return True, url
+        error = stderr.decode("utf-8", errors="replace")
 
-        error = stderr.decode(
-            "utf-8",
-            errors="replace",
-        )
+        # Retry with a broader format if the requested format is unavailable.
+        if "Requested format is not available" in error:
+            retry_command = [
+                "yt-dlp",
+                "--no-warnings",
+                "--no-playlist",
+            ]
 
-        LOGGER.error(
-            "yt-dlp extraction failed: %s",
-            error[-1500:],
-        )
+            if temp_dir:
+                retry_command.extend([
+                    "--cookies",
+                    os.path.join(temp_dir, "cookies.txt"),
+                ])
 
+            retry_command.extend([
+                "--format", "best",
+                "--get-url", link,
+            ])
+
+            retry = await asyncio.create_subprocess_exec(
+                *retry_command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            retry_stdout, retry_stderr = await retry.communicate()
+
+            if retry.returncode == 0 and retry_stdout.strip():
+                return True, retry_stdout.decode(
+                    "utf-8", errors="replace"
+                ).splitlines()[0]
+
+            error = retry_stderr.decode(
+                "utf-8", errors="replace"
+            ) or error
+
+        LOGGER.error("yt-dlp extraction failed: %s", error[-1500:])
         return False, error[-1000:] or "No stream URL returned."
 
     except Exception as exc:
         LOGGER.exception("Stream extraction error")
         return False, str(exc)
+
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 
 def search_youtube(query):
