@@ -221,7 +221,7 @@ async def extract_stream_url(link, video=False):
             "--no-playlist",
         ]
 
-        if os.path.isfile(YOUTUBE_COOKIES_FILE):
+    if os.path.isfile(YOUTUBE_COOKIES_FILE):
     size = os.path.getsize(YOUTUBE_COOKIES_FILE)
 
     if size < 100:
