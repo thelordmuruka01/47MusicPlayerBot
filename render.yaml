@@ -9,16 +9,20 @@ services:
 
     envVars:
       - key: API_ID
-        sync: false
+        value: 1701859
 
       - key: API_HASH
-        sync: false
+        value: "8943790207:AAESXrxdZPE1N19ZNWotWflfE3bzi3Zwz60"
 
       - key: BOT_TOKEN
-        sync: false
+        value: "8943790207:AAESXrxdZPE1N19ZNWotWflfE3bzi3Zwz60"
 
       - key: STRING_SESSION
         sync: false
         
       - key: OWNER_ID
-        sync: false
+        value: 6903701350
+        
+      - key: PORT
+        value: "10000"
+
