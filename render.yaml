@@ -1,28 +1,25 @@
+
 services:
   - type: web
     name: 47Music
     runtime: python
     plan: free
 
-    buildCommand: "pip3 install -U -r requirements.txt"
-    startCommand: "python3 app.py"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app.py"
 
     envVars:
       - key: API_ID
-        value: 1701859
+        sync: false
 
       - key: API_HASH
-        value: "8943790207:AAESXrxdZPE1N19ZNWotWflfE3bzi3Zwz60"
+        sync: false
 
       - key: BOT_TOKEN
-        value: "8943790207:AAESXrxdZPE1N19ZNWotWflfE3bzi3Zwz60"
+        sync: false
 
       - key: SESSION_NAME
         sync: false
-        
-      - key: OWNER_ID
-        value: 6903701350
-        
-      - key: PORT
-        value: "10000"
 
+      - key: OWNER_ID
+        sync: false
