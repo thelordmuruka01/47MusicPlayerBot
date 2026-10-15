@@ -217,11 +217,12 @@ async def extract_stream_url(link, video=False):
 
     try:
         command = [
-            "yt-dlp",
-            "--no-warnings",
-            "--no-playlist",
-        ]
-
+    "yt-dlp",
+    "--no-warnings",
+    "--no-playlist",
+    "--extractor-args",
+    "youtube:player_client=android",
+]
         # Check the cookies file without logging cookie values.
         if os.path.isfile(YOUTUBE_COOKIES_FILE):
             size = os.path.getsize(YOUTUBE_COOKIES_FILE)
