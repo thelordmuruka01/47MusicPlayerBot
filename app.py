@@ -23,6 +23,10 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from helpers.queues import QUEUE, add_to_queue, get_queue, clear_queue, pop_an_item
 from helpers.admin_check import *
+import inspect
+
+
+print("Pyrogram Client signature:", inspect.signature(Client.__init__))
 
 # 1. Flask setup with multi-method support for Render health checks
 app = Flask(__name__)
