@@ -206,9 +206,9 @@ async def safe_delete(message):
 
 
 
-async def extract_stream_url(link, video=False):
-    """Extract a stream URL with writable temporary cookies."""
 
+async def extract_stream_url(link, video=False):
+    """Extract a stream URL using yt-dlp and optional YouTube cookies."""
     format_selector = (
         "best[height<=720]/best" if video else "bestaudio/best"
     )
@@ -226,52 +226,20 @@ async def extract_stream_url(link, video=False):
 
             if size < 100:
                 LOGGER.warning(
-                    "YouTube cookies file looks suspiciously small: %d bytes",
-                    size,
-                )
-            else:
-                LOGGER.info(
-                    "YouTube cookies file found: %s (%d bytes)",
-                    YOUTUBE_COOKIES_FILE,
-                    size,
+                    "YouTube cookies file looks small: %d bytes", size
                 )
 
             temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
             writable_cookies = os.path.join(temp_dir, "cookies.txt")
+            shutil.copyfile(YOUTUBE_COOKIES_FILE, writable_cookies)
 
-            shutil.copyfile(
-                YOUTUBE_COOKIES_FILE,
-                writable_cookies,
-            )
-
-            command.extend([
-                "--cookies",
-                writable_cookies,
-            ])
-
-            LOGGER.info(
-                "YouTube cookies copied to writable temporary file."
-            )
+            command.extend(["--cookies", writable_cookies])
+            LOGGER.info("YouTube cookies copied to temporary file.")
         else:
             LOGGER.warning(
                 "YouTube cookies file not found: %s",
                 YOUTUBE_COOKIES_FILE,
             )
-
-        command.extend([
-            "--format", format_selector,
-            "--get-url", link,
-        ])
-    LOGGER.info(
-        "YouTube cookies copied to writable temporary file."
-    )
-else:
-    LOGGER.warning(
-        "YouTube cookies file not found: %s",
-        YOUTUBE_COOKIES_FILE,
-    )
-        else:
-            LOGGER.warning("YouTube cookies file not found: %s", YOUTUBE_COOKIES_FILE)
 
         command.extend([
             "--format", format_selector,
@@ -292,7 +260,6 @@ else:
 
         error = stderr.decode("utf-8", errors="replace")
 
-        # Retry with a broader format if the requested format is unavailable.
         if "Requested format is not available" in error:
             retry_command = [
                 "yt-dlp",
@@ -337,9 +304,6 @@ else:
     finally:
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-
 
 def search_youtube(query):
     """Search YouTube through yt-dlp and return the first result."""
