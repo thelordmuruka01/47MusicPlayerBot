@@ -1,5 +1,5 @@
 
-FROM python:3.10-bookworm
+FROM python:3.11-bookworm
 
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -19,6 +19,7 @@ RUN python -m pip install --upgrade pip
 COPY requirements.txt .
 
 RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade yt-dlp
 
 COPY . .
 
