@@ -32,6 +32,10 @@ from helpers.queues import (
 )
 from helpers.admin_check import is_admin
 
+YOUTUBE_COOKIES_FILE = os.getenv(
+    "YOUTUBE_COOKIES_FILE",
+    "/etc/secrets/youtube-cookies.txt",
+)
 
 # =========================================================
 # 1. LOGGING
