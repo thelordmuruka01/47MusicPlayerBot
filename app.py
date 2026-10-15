@@ -1082,7 +1082,6 @@ if __name__ == "__main__":
     ).start()
 
     LOGGER.info("Starting PyTgCalls...")
-    check_youtube_cookies()
     call_app.start()
 
     LOGGER.info("PyTgCalls started. Starting Telegram bot...")
