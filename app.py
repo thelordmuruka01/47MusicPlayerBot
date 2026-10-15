@@ -42,7 +42,7 @@ bot = Client(
     api_hash = os.environ["API_HASH"]
 )
 
-client = Client(os.environ["STRING_SESSION"], int(os.environ["API_ID"]), os.environ["API_HASH"])
+client = Client(os.environ["SESSION_NAME"], int(os.environ["API_ID"]), os.environ["API_HASH"])
 
 app = PyTgCalls(client)
 
