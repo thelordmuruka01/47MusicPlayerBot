@@ -634,16 +634,18 @@ async def video_play(_, message):
             chat_id,
         )
 
-    except Exception as exc:
-        LOGGER.exception("Play command failed")
+    
+    except Exception:
+        LOGGER.exception("PLAY COMMAND FAILED")
 
         try:
             await status_message.edit_text(
-                f"❌ <b>Playback error:</b>\n"
-                f"<code>{str(exc)[:800]}</code>"
+                "❌ Playback failed. Check Render logs "
+                "for the full error."
             )
         except Exception:
-            pass
+            LOGGER.exception("FAILED TO SEND PLAYBACK ERROR")
+
 
 
 # =========================================================
