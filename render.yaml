@@ -17,7 +17,7 @@ services:
       - key: BOT_TOKEN
         value: "8943790207:AAESXrxdZPE1N19ZNWotWflfE3bzi3Zwz60"
 
-      - key: STRING_SESSION
+      - key: SESSION_NAME
         sync: false
         
       - key: OWNER_ID
