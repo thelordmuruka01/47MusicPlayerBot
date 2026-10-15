@@ -178,11 +178,25 @@ START_BUTTONS = InlineKeyboardMarkup(
 )
 
 
+
 # =========================================================
 # 8. HELPER FUNCTIONS
 # =========================================================
 
+import os
+import re
+import asyncio
+
+
+# YouTube cookies file on Render
+YOUTUBE_COOKIES_FILE = os.getenv(
+    "YOUTUBE_COOKIES_FILE",
+    "/etc/secrets/youtube-cookies.txt",
+)
+
+
 async def safe_delete(message):
+    """Delete a message safely."""
     try:
         await message.delete()
     except Exception:
@@ -193,6 +207,7 @@ async def extract_stream_url(link, video=False):
     """
     Extract a direct stream URL using yt-dlp.
     Returns (success, result).
+    Supports an optional YouTube cookies file.
     """
 
     if video:
@@ -204,11 +219,27 @@ async def extract_stream_url(link, video=False):
         "yt-dlp",
         "--no-warnings",
         "--no-playlist",
+    ]
+
+    # Add cookies when the file exists
+    if os.path.isfile(YOUTUBE_COOKIES_FILE):
+        command.extend([
+            "--cookies",
+            YOUTUBE_COOKIES_FILE,
+        ])
+        LOGGER.info("YouTube cookies file found; using cookies.")
+    else:
+        LOGGER.warning(
+            "YouTube cookies file not found: %s",
+            YOUTUBE_COOKIES_FILE,
+        )
+
+    command.extend([
         "--format",
         format_selector,
         "--get-url",
         link,
-    ]
+    ])
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -220,11 +251,23 @@ async def extract_stream_url(link, video=False):
         stdout, stderr = await process.communicate()
 
         if process.returncode == 0 and stdout.strip():
-            url = stdout.decode("utf-8", errors="replace").splitlines()[0]
+            url = stdout.decode(
+                "utf-8",
+                errors="replace",
+            ).splitlines()[0]
+
             return True, url
 
-        error = stderr.decode("utf-8", errors="replace")
-        LOGGER.error("yt-dlp extraction failed: %s", error[-1500:])
+        error = stderr.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+        LOGGER.error(
+            "yt-dlp extraction failed: %s",
+            error[-1500:],
+        )
+
         return False, error[-1000:] or "No stream URL returned."
 
     except Exception as exc:
@@ -233,32 +276,47 @@ async def extract_stream_url(link, video=False):
 
 
 def search_youtube(query):
-    """
-    Return the first YouTube search result.
-    """
+    """Return the first YouTube search result."""
 
     from youtube_search import YoutubeSearch
 
-    results = YoutubeSearch(query, max_results=1).to_dict()
+    try:
+        results = YoutubeSearch(
+            query,
+            max_results=1,
+        ).to_dict()
 
-    if not results:
+        if not results:
+            return None
+
+        item = results[0]
+        url_suffix = item.get("url_suffix", "")
+
+        if not url_suffix:
+            return None
+
+        if url_suffix.startswith("http"):
+            link = url_suffix
+        else:
+            link = "https://www.youtube.com" + url_suffix
+
+        thumbnails = item.get("thumbnails") or []
+
+        return {
+            "title": item.get("title", "Unknown title"),
+            "link": link,
+            "duration": item.get("duration", "Unknown"),
+            "thumbnail": thumbnails[0] if thumbnails else "",
+        }
+
+    except Exception:
+        LOGGER.exception("YouTube search failed")
         return None
-
-    item = results[0]
-
-    return {
-        "title": item.get("title", "Unknown title"),
-        "link": "https://www.youtube.com" + item["url_suffix"],
-        "duration": item.get("duration", "Unknown"),
-        "thumbnail": (
-            item.get("thumbnails", [""])[0]
-            if item.get("thumbnails")
-            else ""
-        ),
-    }
 
 
 def get_video_quality(query):
+    """Extract low, mid, or high quality from the query."""
+
     match = re.search(
         r"(?:^|\s)(low|mid|high)(?:\s|$)",
         query,
@@ -269,6 +327,7 @@ def get_video_quality(query):
         return "mid", query.strip()
 
     quality = match.group(1).lower()
+
     cleaned_query = (
         query[:match.start()] + " " + query[match.end():]
     ).strip()
@@ -277,6 +336,8 @@ def get_video_quality(query):
 
 
 def make_video_quality(quality):
+    """Return the matching PyTgCalls video quality."""
+
     if quality == "high":
         return HighQualityVideo()
 
@@ -287,6 +348,8 @@ def make_video_quality(quality):
 
 
 async def stop_chat(chat_id):
+    """Stop the voice chat and clear its queue."""
+
     try:
         await call_app.leave_group_call(chat_id)
     except Exception as exc:
