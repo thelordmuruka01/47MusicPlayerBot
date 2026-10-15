@@ -35,6 +35,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     # host='0.0.0.0' is mandatory for Render/Koyeb/Heroku
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
 bot = Client(
     "Music Stream Bot",
     bot_token=os.environ["BOT_TOKEN"],
@@ -43,9 +44,10 @@ bot = Client(
 )
 
 client = Client(
-    os.environ["SESSION_NAME"],
-    int(os.environ["API_ID"]),
-    os.environ["API_HASH"]
+    "MusicUser",
+    api_id=int(os.environ["API_ID"]),
+    api_hash=os.environ["API_HASH"],
+    session_string=os.environ["SESSION_NAME"]
 )
 
 app = PyTgCalls(client)
