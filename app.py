@@ -54,12 +54,19 @@ LOGGER = logging.getLogger("MusicBot")
 # =========================================================
 # 2. ENVIRONMENT VARIABLES
 # =========================================================
+def get_required_env(name):
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(
+            f"Missing required Render Environment Variable: {name}"
+        )
+    return value
 
-API_ID = int(os.environ["API_ID"])
-API_HASH = os.environ["API_HASH"]
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-SESSION_STRING = os.environ["SESSION_NAME"]
-OWNER_ID = int(os.environ["OWNER_ID"])
+API_ID = int(get_required_env("API_ID"))
+API_HASH = get_required_env("API_HASH")
+BOT_TOKEN = get_required_env("BOT_TOKEN")
+SESSION_STRING = get_required_env("SESSION_NAME")
+OWNER_ID = int(get_required_env("OWNER_ID"))
 
 
 # =========================================================
