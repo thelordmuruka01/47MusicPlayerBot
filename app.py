@@ -1,470 +1,898 @@
 import os
-import glob
-import json
-import logging
+import re
 import asyncio
-import youtube_dl
+import logging
+import threading
+import subprocess
+
 from flask import Flask
-from pytgcalls import StreamType
-from pytube import YouTube
-from youtube_search import YoutubeSearch
-from pytgcalls import PyTgCalls, idle
-from pytgcalls.types import Update
-from pyrogram.raw.base import Update
-from pytgcalls.types import AudioPiped, AudioVideoPiped
+from pyrogram import Client, filters, enums
+from pyrogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    CallbackQuery,
+)
+from pytgcalls import PyTgCalls, StreamType, idle
 from pytgcalls.types import (
+    Update,
+    AudioPiped,
+    AudioVideoPiped,
     HighQualityAudio,
     HighQualityVideo,
+    MediumQualityVideo,
     LowQualityVideo,
-    MediumQualityVideo
 )
-from pytgcalls.types.stream import StreamAudioEnded, StreamVideoEnded
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-from helpers.queues import QUEUE, add_to_queue, get_queue, clear_queue, pop_an_item
-from helpers.admin_check import *
-import inspect
+from pytgcalls.types.stream import StreamAudioEnded
+
+from helpers.queues import (
+    QUEUE,
+    add_to_queue,
+    get_queue,
+    clear_queue,
+)
+from helpers.admin_check import is_admin
 
 
-print("Pyrogram Client signature:", inspect.signature(Client.__init__))
+# =========================================================
+# 1. LOGGING
+# =========================================================
 
-# 1. Flask setup with multi-method support for Render health checks
-app = Flask(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
-@app.route('/', methods=['GET', 'POST', 'HEAD'])
+LOGGER = logging.getLogger("MusicBot")
+
+
+# =========================================================
+# 2. ENVIRONMENT VARIABLES
+# =========================================================
+
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+SESSION_STRING = os.environ["SESSION_NAME"]
+OWNER_ID = int(os.environ["OWNER_ID"])
+
+
+# =========================================================
+# 3. FLASK HEALTH SERVER
+# =========================================================
+
+web_app = Flask(__name__)
+
+
+@web_app.route("/", methods=["GET", "POST", "HEAD"])
+@web_app.route("/health", methods=["GET", "HEAD"])
 def health_check():
     return "Bot is alive!", 200
 
+
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    # host='0.0.0.0' is mandatory for Render/Koyeb/Heroku
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    port = int(os.environ.get("PORT", "10000"))
+
+    web_app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False,
+        use_reloader=False,
+    )
+
+
+# =========================================================
+# 4. PYROGRAM CLIENTS
+# =========================================================
 
 bot = Client(
-    "Music Stream Bot",
-    bot_token=os.environ["BOT_TOKEN"],
-    api_id=int(os.environ["API_ID"]),
-    api_hash=os.environ["API_HASH"]
+    "MusicStreamBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    parse_mode=enums.ParseMode.HTML,
 )
 
 client = Client(
     "MusicUser",
-    api_id=int(os.environ["API_ID"]),
-    api_hash=os.environ["API_HASH"],
-    session_string=os.environ["SESSION_NAME"]
+    api_id=API_ID,
+    api_hash=API_HASH,
+    session_string=SESSION_STRING,
+    parse_mode=enums.ParseMode.HTML,
 )
 
-app = PyTgCalls(client)
 
-OWNER_ID = int(os.environ["OWNER_ID"])
+# =========================================================
+# 5. PYTGCALLS COMPATIBILITY PATCH
+# =========================================================
 
-LIVE_CHATS = []
+# py-tgcalls 0.8.6 expects get_me() to behave like a dictionary.
+# Pyrogram 2.x returns a User object.
+# Patch only the method shown failing in your Render logs.
+
+from pytgcalls.mtproto.pyrogram_client import PyrogramClient
+
+
+async def patched_get_id(self):
+    me = await self._app.get_me()
+
+    if hasattr(me, "id"):
+        return me.id
+
+    return me["id"]
+
+
+PyrogramClient.get_id = patched_get_id
+
+
+# =========================================================
+# 6. PYTGCALLS INSTANCE
+# =========================================================
+
+call_app = PyTgCalls(client)
+
+LIVE_CHATS = set()
+
+
+# =========================================================
+# 7. START MESSAGE
+# =========================================================
 
 START_TEXT = """
 Hi <b>{}</b> 👋
 
-I can play music & stream videos .
+I can play music and stream videos.
+
 ⏤‌★𝐊𝐊 𝐀𝐑𝐌𝐘 𝐎𝐅𝐅𝐈𝐂𝐈𝐀𝐋ꗄ➺
 
-This is a Social Media Friendship Gang with Ultra strong Bond of Lots of Love💞 . We always Try to bring forward the New ideas to  front of the members . We consider our members all are our Family Members . 
+This is a friendship community built on love and
+strong bonds. We consider our members family.
 
-         ☬C‌o‌n‌s‌t‌a‌n‌t‌ A‌d‌m‌i‌ns☬
- ☬   [@FULLY_CRUAL_MIND](https://t.me/FULLY_CRUAL_MIND)
- 🖥  @JinnSulthan
- 🎭  [@im_casanova](https://t.me/im_casanova)
- 🕺  @KottayamkunjachanM88 
- 💃🏾  @Kappusz
- 💙  [@L_The_Fallen_Angel](https://t.me/L_The_Fallen_Angel)
+<b>Constant Admins</b>
 
-Important:- We have a Group and Channel to Register Social media Complaint . 
- one more thing :- They are Connected with Kerala cyber cell(dome), Kerala POLICE Force , indian Army Communication Dept.
-✍🏾Channel :- [@complaint_portal_tg](https://t.me/complaint_portal_tg)
+☬ @FULLY_CRUAL_MIND
+🖥 @JinnSulthan
+🎭 @im_casanova
+🕺 @KottayamkunjachanM88
+💃 @Kappusz
+💙 @L_The_Fallen_Angel
 
+<b>Complaint Channel:</b>
+<a href="https://t.me/complaint_portal_tg">
+@complaint_portal_tg
+</a>
 """
 
 START_BUTTONS = InlineKeyboardMarkup(
     [
         [
-            InlineKeyboardButton("📨 Support", url="https://t.me/KanimangalamKovilakam"),           
+            InlineKeyboardButton(
+                "📨 Support",
+                url="https://t.me/KanimangalamKovilakam",
+            )
         ]
     ]
 )
 
-async def skip_current_song(chat_id):
-    if chat_id in QUEUE:
-        chat_queue = get_queue(chat_id)
-        if len(chat_queue) == 1:
-            await app.leave_group_call(chat_id)
-            clear_queue(chat_id)
-            return 1
-        else:
-            title = chat_queue[1][0]
-            duration = chat_queue[1][1]
-            link = chat_queue[1][2]
-            playlink = chat_queue[1][3]
-            type = chat_queue[1][4]
-            Q = chat_queue[1][5]
-            thumb = chat_queue[1][6]
-            if type == "Audio":
-                await app.change_stream(
-                    chat_id,
-                    AudioPiped(
-                        playlink,
-                    ),
-                )
-            elif type == "Video":
-                if Q == "high":
-                    hm = HighQualityVideo()
-                elif Q == "mid":
-                    hm = MediumQualityVideo()
-                elif Q == "low":
-                    hm = LowQualityVideo()
-                else:
-                    hm = MediumQualityVideo()
-                await app.change_stream(
-                    chat_id, AudioVideoPiped(playlink, HighQualityAudio(), hm)
-                )
-            
-async def skip_item(chat_id, lol):
-    if chat_id in QUEUE:
-        chat_queue = get_queue(chat_id)
-        try:
-            x = int(lol)
-            title = chat_queue[x][0]
-            chat_queue.pop(x)
-            return title
-        except Exception as e:
-            print(e)
-            return 0
+
+# =========================================================
+# 8. HELPER FUNCTIONS
+# =========================================================
+
+async def safe_delete(message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+async def extract_stream_url(link, video=False):
+    """
+    Extract a direct stream URL using yt-dlp.
+    Returns (success, result).
+    """
+
+    if video:
+        format_selector = "best[height<=720]/best"
     else:
+        format_selector = "bestaudio/best"
+
+    command = [
+        "yt-dlp",
+        "--no-warnings",
+        "--no-playlist",
+        "--format",
+        format_selector,
+        "--get-url",
+        link,
+    ]
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode == 0 and stdout.strip():
+            url = stdout.decode("utf-8", errors="replace").splitlines()[0]
+            return True, url
+
+        error = stderr.decode("utf-8", errors="replace")
+        LOGGER.error("yt-dlp extraction failed: %s", error[-1500:])
+        return False, error[-1000:] or "No stream URL returned."
+
+    except Exception as exc:
+        LOGGER.exception("Stream extraction error")
+        return False, str(exc)
+
+
+def search_youtube(query):
+    """
+    Return the first YouTube search result.
+    """
+
+    from youtube_search import YoutubeSearch
+
+    results = YoutubeSearch(query, max_results=1).to_dict()
+
+    if not results:
+        return None
+
+    item = results[0]
+
+    return {
+        "title": item.get("title", "Unknown title"),
+        "link": "https://www.youtube.com" + item["url_suffix"],
+        "duration": item.get("duration", "Unknown"),
+        "thumbnail": (
+            item.get("thumbnails", [""])[0]
+            if item.get("thumbnails")
+            else ""
+        ),
+    }
+
+
+def get_video_quality(query):
+    match = re.search(
+        r"(?:^|\s)(low|mid|high)(?:\s|$)",
+        query,
+        re.IGNORECASE,
+    )
+
+    if not match:
+        return "mid", query.strip()
+
+    quality = match.group(1).lower()
+    cleaned_query = (
+        query[:match.start()] + " " + query[match.end():]
+    ).strip()
+
+    return quality, cleaned_query
+
+
+def make_video_quality(quality):
+    if quality == "high":
+        return HighQualityVideo()
+
+    if quality == "low":
+        return LowQualityVideo()
+
+    return MediumQualityVideo()
+
+
+async def stop_chat(chat_id):
+    try:
+        await call_app.leave_group_call(chat_id)
+    except Exception as exc:
+        LOGGER.warning(
+            "Could not leave voice chat %s: %s",
+            chat_id,
+            exc,
+        )
+
+    clear_queue(chat_id)
+    LIVE_CHATS.discard(chat_id)
+
+
+# =========================================================
+# 9. QUEUE MANAGEMENT
+# =========================================================
+
+async def skip_current_song(chat_id):
+    if chat_id not in QUEUE:
+        return 0
+
+    chat_queue = get_queue(chat_id)
+
+    if not chat_queue:
+        await stop_chat(chat_id)
+        return 1
+
+    # Remove the song that has just finished / was skipped.
+    chat_queue.pop(0)
+
+    if not chat_queue:
+        await stop_chat(chat_id)
+        return 1
+
+    next_song = chat_queue[0]
+
+    title = next_song[0]
+    playlink = next_song[3]
+    media_type = next_song[4]
+    quality = next_song[5]
+
+    try:
+        if media_type == "Audio":
+            stream = AudioPiped(playlink)
+        else:
+            stream = AudioVideoPiped(
+                playlink,
+                HighQualityAudio(),
+                make_video_quality(quality),
+            )
+
+        await call_app.change_stream(chat_id, stream)
+
+        LOGGER.info(
+            "Now playing next queued item in %s: %s",
+            chat_id,
+            title,
+        )
+
+        return 2
+
+    except Exception:
+        LOGGER.exception("Could not switch to next queued item")
+        await stop_chat(chat_id)
         return 0
 
 
-@app.on_stream_end()
+async def skip_item(chat_id, index):
+    if chat_id not in QUEUE:
+        return 0
+
+    chat_queue = get_queue(chat_id)
+
+    try:
+        index = int(index)
+
+        if index <= 0 or index >= len(chat_queue):
+            return 0
+
+        removed = chat_queue.pop(index)
+        return removed[0]
+
+    except (ValueError, IndexError, TypeError):
+        return 0
+
+
+# =========================================================
+# 10. PYTGCALLS EVENTS
+# =========================================================
+
+@call_app.on_stream_end()
 async def on_end_handler(_, update: Update):
     if isinstance(update, StreamAudioEnded):
-        chat_id = update.chat_id
-        await skip_current_song(chat_id)
+        await skip_current_song(update.chat_id)
 
 
-@app.on_closed_voice_chat()
-async def close_handler(client: PyTgCalls, chat_id: int):
+@call_app.on_closed_voice_chat()
+async def close_handler(_, chat_id: int):
     if chat_id in QUEUE:
         clear_queue(chat_id)
-        
 
-async def yt_video(link):
-    proc = await asyncio.create_subprocess_exec(
-        "yt-dlp",
-        "-g",
-        "-f",
-        "best[height<=?720][width<=?1280]",
-        f"{link}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if stdout:
-        return 1, stdout.decode().split("\n")[0]
-    else:
-        return 0, stderr.decode()
-    
+    LIVE_CHATS.discard(chat_id)
 
-async def yt_audio(link):
-    proc = await asyncio.create_subprocess_exec(
-        "yt-dlp",
-        "-g",
-        "-f",
-        "bestaudio",
-        f"{link}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if stdout:
-        return 1, stdout.decode().split("\n")[0]
-    else:
-        return 0, stderr.decode()
+    LOGGER.info("Voice chat closed: %s", chat_id)
 
 
-@bot.on_callback_query()
-async def callbacks(_, cq: CallbackQuery):
-    user_id = cq.from_user.id
-    try:
-        user = await cq.message.chat.get_member(user_id)
-        admin_strings = ("creator", "administrator")
-        if user.status not in admin_strings:
-            is_admin = False
-        else:
-            is_admin = True
-    except ValueError:
-        is_admin = True        
-    if not is_admin:
-        return await cq.answer("You aren't an admin.")   
-    chat_id = cq.message.chat.id
-    data = cq.data
-    if data == "close":
-        return await cq.message.delete()
-    if not chat_id in QUEUE:
-        return await cq.answer("Nothing is playing.")
-
-    if data == "pause":
-        try:
-            await app.pause_stream(chat_id)
-            await cq.answer("⏸️")
-        except:
-            await cq.answer("Nothing is playing.")
-      
-    elif data == "resume":
-        try:
-            await app.resume_stream(chat_id)
-            await cq.answer("⏯️")
-        except:
-            await cq.answer("Nothing is playing.")   
-
-    elif data == "stop":
-        await app.leave_group_call(chat_id)
-        clear_queue(chat_id)
-        await cq.answer("❌")
-        await cq.answer.delete()  
-
-    elif data == "mute":
-        try:
-            await app.mute_stream(chat_id)
-            await cq.answer("🔇")
-        except:
-            await cq.answer("Nothing is playing.")
-            
-    elif data == "unmute":
-        try:
-            await app.unmute_stream(chat_id)
-            await cq.answer("🔊")
-        except:
-            await cq.answer("Nothing is playing.")
-            
-    elif data == "skip":
-        op = await skip_current_song(chat_id)
-        if op == 0:
-            await cq.answer("Nothing in the queue to skip.")
-        elif op == 1:
-            await cq.answer("Empty queue, stopped streaming.")
-        else:
-            await cq.answer("🦋")
-            
+# =========================================================
+# 11. START COMMAND
+# =========================================================
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_private(_, message):
-    msg = START_TEXT.format(message.from_user.mention)
-    await message.reply_text(text = msg,
-                             reply_markup = START_BUTTONS)
-    
+    name = message.from_user.mention if message.from_user else "there"
+
+    await message.reply_text(
+        START_TEXT.format(name),
+        reply_markup=START_BUTTONS,
+        disable_web_page_preview=True,
+    )
+
 
 @bot.on_message(filters.command("start") & filters.group)
 async def start_group(_, message):
-    await message.reply_text("🎧 <i>Music player is running.</i>")
-    
-    
-@bot.on_message(filters.command(["play", "vplay"]) & filters.group)
-async def video_play(_, message):
-    await message.delete()
-    user_id = message.from_user.id
-    state = message.command[0].lower()
-    try:
-        query = message.text.split(None, 1)[1]
-    except:
-        return await message.reply_text(f"<b>Usage:</b> <code>/{state} [query]</code>")
-    chat_id = message.chat.id
-    if chat_id in LIVE_CHATS:
-        return await message.reply_text("❗️Please send <code>/stop</code> to end current live streaming before play songs or videos.")
-   
-    if state == "play":
-        damn = AudioPiped
-        ded = yt_audio
-        doom = "Audio"
-    elif state == "vplay":
-        damn = AudioVideoPiped
-        ded = yt_video
-        doom = "Video"
-    if "low" in query:
-        Q = "low"
-    elif "mid" in query:
-        Q = "mid"
-    elif "high" in query:
-        Q = "high"
-    else:
-        Q = "0"
-    try:
-        results = YoutubeSearch(query, max_results=1).to_dict()
-        link = f"https://youtube.com{results[0]['url_suffix']}"
-        thumb = results[0]["thumbnails"][0]
-        duration = results[0]["duration"]
-        yt = YouTube(link)
-        cap = f"▶️ <b>Now playing:</b> [{yt.title}]({link}) | `{doom}` \n\n⏳ <b>Duration:</b> {duration}"
+    await message.reply_text(
+        "🎧 <i>Music player is running.</i>"
+    )
+
+
+# =========================================================
+# 12. CALLBACK BUTTONS
+# =========================================================
+
+@bot.on_callback_query()
+async def callbacks(_, cq: CallbackQuery):
+    if not cq.message or not cq.from_user:
+        return await cq.answer()
+
+    data = cq.data
+    chat_id = cq.message.chat.id
+    user_id = cq.from_user.id
+
+    if data == "close":
         try:
-            ydl_opts = {"format": "bestvideo[height<=720]+bestaudio/best[height<=720]"}
-            ydl = youtube_dl.YoutubeDL(ydl_opts)
-            info_dict = ydl.extract_info(link, download=False)
-            p = json.dumps(info_dict)
-            a = json.loads(p)
-            playlink = a['formats'][1]['manifest_url']
-        except:
-            ice, playlink = await ded(link)
-            if ice == "0":
-                return await m.edit("❗️YTDL ERROR !!!")               
-    except Exception as e:
-        return await m.edit(str(e))
-    
+            await cq.message.delete()
+        except Exception:
+            pass
+
+        return await cq.answer()
+
+    # Check whether the clicking user is an admin.
     try:
-        if chat_id in QUEUE:
-            position = add_to_queue(chat_id, yt.title, duration, link, playlink, doom, Q, thumb)
-            caps = f"#️⃣ [{yt.title}]({link}) <b>queued at position {position}</b> \n\n⏳ <b>Duration:</b> {duration}"          
-        else:            
-            await app.join_group_call(
-                chat_id,
-                damn(playlink),
-                stream_type=StreamType().pulse_stream
+        member = await bot.get_chat_member(chat_id, user_id)
+        status = str(member.status).lower().split(".")[-1]
+
+        if status not in ("owner", "creator", "administrator"):
+            return await cq.answer(
+                "You aren't an admin.",
+                show_alert=True,
             )
-            add_to_queue(chat_id, yt.title, duration, link, playlink, doom, Q, thumb)          
-    except Exception as e:
-        return await m.edit(str(e))
-    
+
+    except Exception as exc:
+        LOGGER.warning("Admin check failed: %s", exc)
+
+        return await cq.answer(
+            "Could not verify your admin status.",
+            show_alert=True,
+        )
+
+    if chat_id not in QUEUE:
+        return await cq.answer("Nothing is playing.")
+
+    try:
+        if data == "pause":
+            await call_app.pause_stream(chat_id)
+            return await cq.answer("⏸️ Paused")
+
+        if data == "resume":
+            await call_app.resume_stream(chat_id)
+            return await cq.answer("⏯️ Resumed")
+
+        if data == "stop":
+            await stop_chat(chat_id)
+            return await cq.answer("⏹️ Stopped")
+
+        if data == "mute":
+            await call_app.mute_stream(chat_id)
+            return await cq.answer("🔇 Muted")
+
+        if data == "unmute":
+            await call_app.unmute_stream(chat_id)
+            return await cq.answer("🔊 Unmuted")
+
+        if data == "skip":
+            result = await skip_current_song(chat_id)
+
+            if result == 1:
+                return await cq.answer("Queue ended.")
+
+            if result == 0:
+                return await cq.answer(
+                    "Unable to skip this song.",
+                    show_alert=True,
+                )
+
+            return await cq.answer("⏭️ Skipped")
+
+    except Exception:
+        LOGGER.exception("Callback action failed")
+        return await cq.answer(
+            "Action failed.",
+            show_alert=True,
+        )
+
+    await cq.answer()
+
+
+# =========================================================
+# 13. PLAY / VPLAY COMMAND
+# =========================================================
+
+@bot.on_message(
+    filters.command(["play", "vplay"]) & filters.group
+)
+async def video_play(_, message):
+    if not message.from_user:
+        return
+
+    if not message.text:
+        return
+
+    command_name = message.command[0].lower()
+
+    if len(message.command) < 2:
+        return await message.reply_text(
+            f"<b>Usage:</b> <code>/{command_name} song name</code>"
+        )
+
+    query = message.text.split(None, 1)[1].strip()
+
+    if not query:
+        return await message.reply_text("Please provide a song name.")
+
+    quality, search_query = get_video_quality(query)
+
+    if not search_query:
+        search_query = query
+
+    chat_id = message.chat.id
+    is_video = command_name == "vplay"
+    media_type = "Video" if is_video else "Audio"
+
+    if chat_id in LIVE_CHATS:
+        return await message.reply_text(
+            "❗ Please stop the live stream before playing music."
+        )
+
+    status_message = await message.reply_text(
+        "🔎 <i>Searching YouTube...</i>"
+    )
+
+    try:
+        result = await asyncio.to_thread(
+            search_youtube,
+            search_query,
+        )
+
+        if not result:
+            return await status_message.edit_text(
+                "❌ No YouTube results found."
+            )
+
+        title = result["title"]
+        link = result["link"]
+        duration = result["duration"]
+        thumbnail = result["thumbnail"]
+
+        success, extracted = await extract_stream_url(
+            link,
+            video=is_video,
+        )
+
+        if not success:
+            LOGGER.error("Stream URL extraction failed: %s", extracted)
+
+            return await status_message.edit_text(
+                "❌ Unable to extract this YouTube stream. "
+                "Please try another song."
+            )
+
+        playlink = extracted
+
+        if is_video:
+            stream = AudioVideoPiped(
+                playlink,
+                HighQualityAudio(),
+                make_video_quality(quality),
+            )
+        else:
+            stream = AudioPiped(playlink)
+
+        caption = (
+            f"▶️ <b>{'Video' if is_video else 'Now playing'}:</b> "
+            f'<a href="{link}">{title}</a>\n'
+            f"⏳ <b>Duration:</b> {duration}"
+        )
+
+        if chat_id in QUEUE and get_queue(chat_id):
+            position = add_to_queue(
+                chat_id,
+                title,
+                duration,
+                link,
+                playlink,
+                media_type,
+                quality,
+                thumbnail,
+            )
+
+            await status_message.edit_text(
+                f"➕ <b>Added to queue:</b> "
+                f'<a href="{link}">{title}</a>\n'
+                f"🔢 <b>Position:</b> {position}\n"
+                f"⏳ <b>Duration:</b> {duration}"
+            )
+
+        else:
+            await call_app.join_group_call(
+                chat_id,
+                stream,
+                stream_type=StreamType().pulse_stream,
+            )
+
+            add_to_queue(
+                chat_id,
+                title,
+                duration,
+                link,
+                playlink,
+                media_type,
+                quality,
+                thumbnail,
+            )
+
+            await status_message.edit_text(caption)
+
+        LOGGER.info(
+            "Playback request processed: %s in %s",
+            title,
+            chat_id,
+        )
+
+    except Exception as exc:
+        LOGGER.exception("Play command failed")
+
+        try:
+            await status_message.edit_text(
+                f"❌ <b>Playback error:</b>\n"
+                f"<code>{str(exc)[:800]}</code>"
+            )
+        except Exception:
+            pass
+
+
+# =========================================================
+# 14. SKIP COMMAND
+# =========================================================
 
 @bot.on_message(filters.command("skip") & filters.group)
 @is_admin
 async def skip(_, message):
-    await message.delete()
+    await safe_delete(message)
+
     chat_id = message.chat.id
+
+    if chat_id not in QUEUE or not get_queue(chat_id):
+        return await bot.send_message(
+            chat_id,
+            "❗ Nothing is playing.",
+        )
+
     if len(message.command) < 2:
-        op = await skip_current_song(chat_id)
-        if op == 0:
-            await message.reply_text("❗️Nothing in the queue to skip.")
-        elif op == 1:
-            await message.reply_text("❗️Empty queue, stopped streaming.")
+        result = await skip_current_song(chat_id)
+
+        if result == 1:
+            await bot.send_message(
+                chat_id,
+                "⏹️ Queue ended.",
+            )
+        elif result == 0:
+            await bot.send_message(
+                chat_id,
+                "❌ Unable to skip.",
+            )
+        else:
+            await bot.send_message(
+                chat_id,
+                "⏭️ Skipped to the next song.",
+            )
+
+        return
+
+    indexes = [
+        int(value)
+        for value in message.text.split(None, 1)[1].split()
+        if value.isdigit()
+    ]
+
+    removed_titles = []
+
+    # Remove highest indexes first.
+    for index in sorted(set(indexes), reverse=True):
+        title = await skip_item(chat_id, index)
+
+        if title:
+            removed_titles.append(f"• {title}")
+
+    if removed_titles:
+        await bot.send_message(
+            chat_id,
+            "<b>Removed from queue:</b>\n"
+            + "\n".join(removed_titles),
+        )
     else:
-        skip = message.text.split(None, 1)[1]
-        out = "🗑 <b>Removed the following song(s) from the queue:</b> \n"
-        if chat_id in QUEUE:
-            items = [int(x) for x in skip.split(" ") if x.isdigit()]
-            items.sort(reverse=True)
-            for x in items:
-                if x == 0:
-                    pass
-                else:
-                    hm = await skip_item(chat_id, x)
-                    if hm == 0:
-                        pass
-                    else:
-                        out = out + "\n" + f"<b>#️⃣ {x}</b> - {hm}"
-            
-            
-            
-@bot.on_message(filters.command(["playlist", "queue"]) & filters.group)
+        await bot.send_message(
+            chat_id,
+            "❗ No matching queue items were removed.",
+        )
+
+
+# =========================================================
+# 15. PLAYLIST / QUEUE COMMAND
+# =========================================================
+
+@bot.on_message(
+    filters.command(["playlist", "queue"]) & filters.group
+)
 @is_admin
 async def playlist(_, message):
     chat_id = message.chat.id
-    if chat_id in QUEUE:
-        chat_queue = get_queue(chat_id)
-        if len(chat_queue) == 1:
-            await message.delete()         
+
+    if chat_id not in QUEUE or not get_queue(chat_id):
+        return await message.reply_text("❗ Nothing is playing.")
+
+    chat_queue = get_queue(chat_id)
+
+    lines = ["<b>📃 Player queue</b>\n"]
+
+    for index, item in enumerate(chat_queue):
+        title = item[0]
+        link = item[2]
+        media_type = item[4]
+
+        if index == 0:
+            lines.append(
+                f'▶️ <a href="{link}">{title}</a> '
+                f"<b>(Now playing)</b> — {media_type}"
+            )
         else:
-            out = f"<b>📃 Player queue:</b> \n\n▶️ <b>Now playing:</b> [{chat_queue[0][0]}]({chat_queue[0][2]}) | `{chat_queue[0][4]}` \n"
-            l = len(chat_queue)
-            for x in range(1, l):
-                title = chat_queue[x][0]
-                link = chat_queue[x][2]
-                type = chat_queue[x][4]
-                out = out + "\n" + f"<b>#️⃣ {x}</b> - [{title}]({link}) | `{type}` \n"           
-    else:
-        await message.reply_text("❗Nothing is playing.")
-    
+            lines.append(
+                f'{index}. <a href="{link}">{title}</a> '
+                f"— {media_type}"
+            )
+
+    output = "\n".join(lines)
+
+    # Telegram message length limit protection.
+    await message.reply_text(
+        output[:4000],
+        disable_web_page_preview=True,
+    )
+
+
+# =========================================================
+# 16. STOP COMMAND
+# =========================================================
 
 @bot.on_message(filters.command("stop") & filters.group)
 @is_admin
 async def end(_, message):
-    await message.delete()
+    await safe_delete(message)
+
     chat_id = message.chat.id
+
     if chat_id in LIVE_CHATS:
-        await app.leave_group_call(chat_id)
-        LIVE_CHATS.remove(chat_id)
-        return await message.reply_text("⏹ Stopped streaming.")
-        
+        await stop_chat(chat_id)
+
+        return await bot.send_message(
+            chat_id,
+            "⏹️ Live streaming stopped.",
+        )
+
     if chat_id in QUEUE:
-        await app.leave_group_call(chat_id)
-        clear_queue(chat_id)
-        await message.reply_text("❌")
-    else:
-        await message.reply_text("❗Nothing is playing.")
-        
+        await stop_chat(chat_id)
+
+        return await bot.send_message(
+            chat_id,
+            "⏹️ Playback stopped and queue cleared.",
+        )
+
+    await bot.send_message(chat_id, "❗ Nothing is playing.")
+
+
+# =========================================================
+# 17. PAUSE COMMAND
+# =========================================================
 
 @bot.on_message(filters.command("pause") & filters.group)
 @is_admin
 async def pause(_, message):
-    await message.delete()
+    await safe_delete(message)
+
     chat_id = message.chat.id
-    if chat_id in QUEUE:
-        try:
-            await app.pause_stream(chat_id)
-            await message.reply_text("⏸")
-        except:
-            await message.reply_text("❗Nothing is playing.")
-    else:
-        await message.reply_text("❗Nothing is playing.")
-        
-        
+
+    try:
+        await call_app.pause_stream(chat_id)
+        await bot.send_message(chat_id, "⏸️ Paused.")
+    except Exception:
+        await bot.send_message(chat_id, "❗ Nothing is playing.")
+
+
+# =========================================================
+# 18. RESUME COMMAND
+# =========================================================
+
 @bot.on_message(filters.command("resume") & filters.group)
 @is_admin
 async def resume(_, message):
-    await message.delete()
+    await safe_delete(message)
+
     chat_id = message.chat.id
-    if chat_id in QUEUE:
-        try:
-            await app.resume_stream(chat_id)
-            await message.reply_text("⏯️")
-        except:
-            await message.reply_text("❗Nothing is playing.")
-    else:
-        await message.reply_text("❗Nothing is playing.")
-        
-        
+
+    try:
+        await call_app.resume_stream(chat_id)
+        await bot.send_message(chat_id, "⏯️ Resumed.")
+    except Exception:
+        await bot.send_message(chat_id, "❗ Nothing is playing.")
+
+
+# =========================================================
+# 19. MUTE COMMAND
+# =========================================================
+
 @bot.on_message(filters.command("mute") & filters.group)
 @is_admin
 async def mute(_, message):
-    await message.delete()
+    await safe_delete(message)
+
     chat_id = message.chat.id
-    if chat_id in QUEUE:
-        try:
-            await app.mute_stream(chat_id)
-            await message.reply_text("🔇")
-        except:
-            await message.reply_text("❗Nothing is playing.")
-    else:
-        await message.reply_text("❗Nothing is playing.")
-        
-        
+
+    try:
+        await call_app.mute_stream(chat_id)
+        await bot.send_message(chat_id, "🔇 Muted.")
+    except Exception:
+        await bot.send_message(chat_id, "❗ Nothing is playing.")
+
+
+# =========================================================
+# 20. UNMUTE COMMAND
+# =========================================================
+
 @bot.on_message(filters.command("unmute") & filters.group)
 @is_admin
 async def unmute(_, message):
-    await message.delete()
+    await safe_delete(message)
+
     chat_id = message.chat.id
-    if chat_id in QUEUE:
-        try:
-            await app.unmute_stream(chat_id)
-            await message.reply_text("🔊")
-        except:
-            await message.reply_text("❗Nothing is playing.")
-    else:
-        await message.reply_text("❗Nothing is playing.")
-        
-        
+
+    try:
+        await call_app.unmute_stream(chat_id)
+        await bot.send_message(chat_id, "🔊 Unmuted.")
+    except Exception:
+        await bot.send_message(chat_id, "❗ Nothing is playing.")
+
+
+# =========================================================
+# 21. RESTART COMMAND
+# =========================================================
+
 @bot.on_message(filters.command("restart"))
 async def restart(_, message):
-    user_id = message.from_user.id
-    if user_id != OWNER_ID:
+    if not message.from_user:
         return
-    await message.reply_text("🛠 <i>Restarting Music Player...</i>")
-    os.system(f"kill -9 {os.getpid()} && python3 app.py")
-            
 
-app.start()
-bot.run()
-idle()
+    if message.from_user.id != OWNER_ID:
+        return
+
+    await message.reply_text(
+        "🛠 <i>Restarting music player...</i>"
+    )
+
+    # Render will normally restart the process after exit.
+    os._exit(0)
+
+
+# =========================================================
+# 22. STARTUP
+# =========================================================
+
+if __name__ == "__main__":
+    LOGGER.info("Starting Flask health server...")
+
+    threading.Thread(
+        target=run_flask,
+        daemon=True,
+    ).start()
+
+    LOGGER.info("Starting PyTgCalls...")
+
+    call_app.start()
+
+    LOGGER.info("PyTgCalls started. Starting Telegram bot...")
+
+    bot.run()
