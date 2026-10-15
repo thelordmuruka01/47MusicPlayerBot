@@ -218,139 +218,117 @@ ydl_opts = {
     "no_warnings": True,
     "noplaylist": True,
 }
+
 async def extract_stream_url(link, video=False):
-    """Extract a stream URL using yt-dlp and optional YouTube cookies."""
-    format_selector = "bestaudio[protocol=https]/bestaudio/best"
+    """Extract a playable YouTube stream URL with format fallbacks."""
+
     temp_dir = None
 
     try:
-        command = [
+        # Do not force the Android player client.
+        # Let yt-dlp choose the available YouTube clients.
+        base_command = [
             "yt-dlp",
             "--no-warnings",
             "--no-playlist",
-            "--extractor-args",
-            "youtube:player_client=android",
+            "--socket-timeout", "20",
+            "--retries", "2",
         ]
 
-        # Check the cookies file without logging cookie values.
         if os.path.isfile(YOUTUBE_COOKIES_FILE):
-            size = os.path.getsize(YOUTUBE_COOKIES_FILE)
-
-            try:
-                with open(
-                    YOUTUBE_COOKIES_FILE, "r", encoding="utf-8"
-                ) as cookie_file:
-                    lines = cookie_file.readlines()
-
-                cookie_lines = [
-                    line for line in lines
-                    if line.strip()
-                    and not line.lstrip().startswith("#")
-                    and len(line.rstrip().split("\t")) >= 7
-                ]
-
-                LOGGER.info(
-                    "YouTube cookies check: exists=True, "
-                    "size=%d bytes, cookie_records=%d",
-                    size,
-                    len(cookie_lines),
-                )
-
-                if not cookie_lines:
-                    LOGGER.warning(
-                        "Cookies file may be empty or not in "
-                        "Netscape cookies.txt format."
-                    )
-
-            except (OSError, UnicodeError):
-                LOGGER.exception(
-                    "Could not inspect YouTube cookies file."
-                )
-
-            if size < 100:
-                LOGGER.warning(
-                    "YouTube cookies file looks small: %d bytes",
-                    size,
-                )
-
-            # Copy cookies to a writable temporary file.
             temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
             writable_cookies = os.path.join(
                 temp_dir, "cookies.txt"
             )
+
             shutil.copyfile(
-                YOUTUBE_COOKIES_FILE, writable_cookies
+                YOUTUBE_COOKIES_FILE,
+                writable_cookies,
             )
 
-            command.extend(["--cookies", writable_cookies])
-            LOGGER.info("YouTube cookies copied to temporary file.")
+            base_command.extend([
+                "--cookies", writable_cookies
+            ])
 
+            LOGGER.info("YouTube cookies loaded for extraction.")
         else:
             LOGGER.warning(
                 "YouTube cookies file not found: %s",
                 YOUTUBE_COOKIES_FILE,
             )
 
-        command.extend([
-            "--format", format_selector,
-            "--get-url", link,
-        ])
-
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode == 0 and stdout.strip():
-            return True, stdout.decode(
-                "utf-8", errors="replace"
-            ).splitlines()[0]
-
-        error = stderr.decode("utf-8", errors="replace")
-
-        # Retry with a broader format if the requested format is unavailable.
-        if "Requested format is not available" in error:
-            retry_command = [
-                "yt-dlp",
-                "--no-warnings",
-                "--no-playlist",
-                "--extractor-args",
-                "youtube:player_client=android",
+        # Each selector is tried separately.
+        # For video playback, prefer a single combined format.
+        if video:
+            selectors = [
+                "best[ext=mp4]/best",
+                "best",
+            ]
+        else:
+            selectors = [
+                "bestaudio/best",
+                "best",
             ]
 
-            if temp_dir:
-                retry_command.extend([
-                    "--cookies",
-                    os.path.join(temp_dir, "cookies.txt"),
-                ])
+        last_error = "No stream URL returned."
 
-            retry_command.extend([
-                "--format", "best",
-                "--get-url", link,
-            ])
+        for selector in selectors:
+            command = base_command + [
+                "--format", selector,
+                "--get-url",
+                link,
+            ]
 
-            retry = await asyncio.create_subprocess_exec(
-                *retry_command,
+            LOGGER.info(
+                "Trying yt-dlp format selector: %s",
+                selector,
+            )
+
+            process = await asyncio.create_subprocess_exec(
+                *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            retry_stdout, retry_stderr = await retry.communicate()
 
-            if retry.returncode == 0 and retry_stdout.strip():
-                return True, retry_stdout.decode(
-                    "utf-8", errors="replace"
-                ).splitlines()[0]
+            stdout, stderr = await process.communicate()
 
-            error = retry_stderr.decode(
+            output = stdout.decode(
                 "utf-8", errors="replace"
-            ) or error
+            ).strip()
+
+            error = stderr.decode(
+                "utf-8", errors="replace"
+            ).strip()
+
+            if process.returncode == 0 and output:
+                urls = [
+                    line.strip()
+                    for line in output.splitlines()
+                    if line.strip().startswith(("https://", "http://"))
+                ]
+
+                if urls:
+                    LOGGER.info(
+                        "Stream URL extracted successfully."
+                    )
+                    return True, urls[0]
+
+            last_error = error or (
+                f"yt-dlp returned exit code {process.returncode}"
+            )
+
+            LOGGER.warning(
+                "Format '%s' failed: %s",
+                selector,
+                last_error[-800:],
+            )
 
         LOGGER.error(
-            "yt-dlp extraction failed: %s", error[-1500:]
+            "All yt-dlp format attempts failed: %s",
+            last_error[-1200:],
         )
-        return False, error[-1000:] or "No stream URL returned."
+
+        return False, last_error[-1000:]
 
     except Exception as exc:
         LOGGER.exception("Stream extraction error")
@@ -359,6 +337,7 @@ async def extract_stream_url(link, video=False):
     finally:
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 def search_youtube(query):
     """Search YouTube through yt-dlp and return the first result."""
