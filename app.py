@@ -219,9 +219,7 @@ async def safe_delete(message):
 
 async def extract_stream_url(link, video=False):
     """Extract a stream URL using yt-dlp and optional YouTube cookies."""
-    format_selector = (
-        "best[height<=720]/best" if video else "bestaudio/best"
-    )
+    format_selector = "bestaudio[protocol=https]/bestaudio/best"
     temp_dir = None
 
     try:
