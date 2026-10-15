@@ -207,8 +207,9 @@ async def safe_delete(message):
 
 
 
+
 async def extract_stream_url(link, video=False):
-    """Extract a stream URL using yt-dlp and optional YouTube cookies."""
+    """Extract a stream URL using yt-dlp and validate cookie file format."""
     format_selector = (
         "best[height<=720]/best" if video else "bestaudio/best"
     )
@@ -221,20 +222,61 @@ async def extract_stream_url(link, video=False):
             "--no-playlist",
         ]
 
+        # Check the cookies file without logging cookie values.
         if os.path.isfile(YOUTUBE_COOKIES_FILE):
             size = os.path.getsize(YOUTUBE_COOKIES_FILE)
 
-            if size < 100:
-                LOGGER.warning(
-                    "YouTube cookies file looks small: %d bytes", size
+            try:
+                with open(
+                    YOUTUBE_COOKIES_FILE, "r", encoding="utf-8"
+                ) as cookie_file:
+                    lines = cookie_file.readlines()
+
+                cookie_lines = [
+                    line for line in lines
+                    if line.strip()
+                    and not line.lstrip().startswith("#")
+                    and len(line.rstrip().split("\t")) >= 7
+                ]
+
+                LOGGER.info(
+                    "YouTube cookies check: exists=True, "
+                    "size=%d bytes, cookie_records=%d",
+                    size,
+                    len(cookie_lines),
                 )
 
+                if not cookie_lines:
+                    LOGGER.warning(
+                        "Cookies file may be empty or not in "
+                        "Netscape cookies.txt format."
+                    )
+
+            except (OSError, UnicodeError):
+                LOGGER.exception(
+                    "Could not inspect YouTube cookies file."
+                )
+
+            if size < 100:
+                LOGGER.warning(
+                    "YouTube cookies file looks small: %d bytes",
+                    size,
+                )
+
+            # Copy cookies to a writable temporary file.
             temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
-            writable_cookies = os.path.join(temp_dir, "cookies.txt")
-            shutil.copyfile(YOUTUBE_COOKIES_FILE, writable_cookies)
+            writable_cookies = os.path.join(
+                temp_dir, "cookies.txt"
+            )
+            shutil.copyfile(
+                YOUTUBE_COOKIES_FILE, writable_cookies
+            )
 
             command.extend(["--cookies", writable_cookies])
-            LOGGER.info("YouTube cookies copied to temporary file.")
+            LOGGER.info(
+                "YouTube cookies copied to temporary file."
+            )
+
         else:
             LOGGER.warning(
                 "YouTube cookies file not found: %s",
@@ -260,6 +302,7 @@ async def extract_stream_url(link, video=False):
 
         error = stderr.decode("utf-8", errors="replace")
 
+        # Retry with a broader format if the requested one is unavailable.
         if "Requested format is not available" in error:
             retry_command = [
                 "yt-dlp",
@@ -294,7 +337,9 @@ async def extract_stream_url(link, video=False):
                 "utf-8", errors="replace"
             ) or error
 
-        LOGGER.error("yt-dlp extraction failed: %s", error[-1500:])
+        LOGGER.error(
+            "yt-dlp extraction failed: %s", error[-1500:]
+        )
         return False, error[-1000:] or "No stream URL returned."
 
     except Exception as exc:
