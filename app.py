@@ -212,11 +212,12 @@ async def safe_delete(message):
     except Exception:
         pass
 
-
-
-
-
-
+ydl_opts = {
+    "format": "bestaudio/best",
+    "quiet": True,
+    "no_warnings": True,
+    "noplaylist": True,
+}
 async def extract_stream_url(link, video=False):
     """Extract a stream URL using yt-dlp and optional YouTube cookies."""
     format_selector = "bestaudio[protocol=https]/bestaudio/best"
