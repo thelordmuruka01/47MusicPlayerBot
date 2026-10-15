@@ -34,10 +34,16 @@ from helpers.queues import (
 )
 from helpers.admin_check import is_admin
 
+
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 YOUTUBE_COOKIES_FILE = os.getenv(
     "YOUTUBE_COOKIES_FILE",
-    "/etc/secrets/youtube-cookies.txt",
+    os.path.join(BASE_DIR, "youtube-cookies.txt"),
 )
+
 
 # =========================================================
 # 1. LOGGING
