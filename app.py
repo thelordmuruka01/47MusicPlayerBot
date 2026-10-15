@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import asyncio
 import logging
 import threading
@@ -297,43 +298,92 @@ async def extract_stream_url(link, video=False):
 
 
 
-def search_youtube(query):
-    """Return the first YouTube search result."""
 
-    from youtube_search import YoutubeSearch
+def search_youtube(query):
+    """Search YouTube through yt-dlp and return the first result."""
+
+    temp_dir = None
 
     try:
-        results = YoutubeSearch(
-            query,
-            max_results=1,
-        ).to_dict()
+        command = [
+            "yt-dlp",
+            "--no-warnings",
+            "--ignore-errors",
+            "--skip-download",
+            "--dump-single-json",
+            "--flat-playlist",
+            "--playlist-end", "1",
+        ]
 
-        if not results:
+        if os.path.isfile(YOUTUBE_COOKIES_FILE):
+            temp_dir = tempfile.mkdtemp(prefix="ytsearch_")
+            writable_cookies = os.path.join(temp_dir, "cookies.txt")
+            shutil.copyfile(YOUTUBE_COOKIES_FILE, writable_cookies)
+            command.extend(["--cookies", writable_cookies])
+
+        command.append(f"ytsearch1:{query}")
+
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+
+        if result.returncode != 0 or not result.stdout.strip():
+            LOGGER.error(
+                "yt-dlp YouTube search failed: %s",
+                (result.stderr or "No search results")[-1200:],
+            )
             return None
 
-        item = results[0]
-        url_suffix = item.get("url_suffix", "")
+        data = json.loads(result.stdout)
+        entries = data.get("entries") or []
 
-        if not url_suffix:
+        if not entries:
             return None
 
-        if url_suffix.startswith("http"):
-            link = url_suffix
-        else:
-            link = "https://www.youtube.com" + url_suffix
+        item = entries[0]
+        video_id = item.get("id")
+        link = item.get("webpage_url")
+
+        if not link and video_id:
+            link = f"https://www.youtube.com/watch?v={video_id}"
+
+        if not link:
+            return None
+
+        duration = item.get("duration_string")
+
+        if not duration and item.get("duration") is not None:
+            seconds = int(item["duration"])
+            hours, remainder = divmod(seconds, 3600)
+            minutes, secs = divmod(remainder, 60)
+            duration = (
+                f"{hours}:{minutes:02d}:{secs:02d}"
+                if hours else f"{minutes}:{secs:02d}"
+            )
 
         thumbnails = item.get("thumbnails") or []
+        thumbnail = item.get("thumbnail") or (
+            thumbnails[-1].get("url") if thumbnails else ""
+        )
 
         return {
-            "title": item.get("title", "Unknown title"),
+            "title": item.get("title") or "Unknown title",
             "link": link,
-            "duration": item.get("duration", "Unknown"),
-            "thumbnail": thumbnails[0] if thumbnails else "",
+            "duration": duration or "Unknown",
+            "thumbnail": thumbnail,
         }
 
     except Exception:
-        LOGGER.exception("YouTube search failed")
+        LOGGER.exception("yt-dlp YouTube search failed")
         return None
+
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def get_video_quality(query):
