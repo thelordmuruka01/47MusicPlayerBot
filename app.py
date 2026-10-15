@@ -37,12 +37,16 @@ def run_flask():
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 bot = Client(
     "Music Stream Bot",
-    bot_token = os.environ["BOT_TOKEN"],
-    api_id = int(os.environ["API_ID"]),
-    api_hash = os.environ["API_HASH"]
+    bot_token=os.environ["BOT_TOKEN"],
+    api_id=int(os.environ["API_ID"]),
+    api_hash=os.environ["API_HASH"]
 )
 
-client = Client(os.environ["SESSION_NAME"], int(os.environ["API_ID"]), os.environ["API_HASH"])
+client = Client(
+    os.environ["SESSION_NAME"],
+    int(os.environ["API_ID"]),
+    os.environ["API_HASH"]
+)
 
 app = PyTgCalls(client)
 
