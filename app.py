@@ -339,6 +339,28 @@ async def extract_stream_url(link, video=False):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+# Check installed yt-dlp version
+try:
+    version_result = subprocess.run(
+        ["yt-dlp", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    LOGGER.info(
+        "yt-dlp version: %s",
+        version_result.stdout.strip()
+        or version_result.stderr.strip()
+        or "Version unavailable",
+    )
+
+except Exception:
+    LOGGER.exception("Could not check yt-dlp version")
+
+
+
 def search_youtube(query):
     """Search YouTube through yt-dlp and return the first result."""
 
