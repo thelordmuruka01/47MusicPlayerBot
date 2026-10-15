@@ -208,8 +208,9 @@ async def safe_delete(message):
 
 
 
+
 async def extract_stream_url(link, video=False):
-    """Extract a stream URL using yt-dlp and validate cookie file format."""
+    """Extract a stream URL using yt-dlp and optional YouTube cookies."""
     format_selector = (
         "best[height<=720]/best" if video else "bestaudio/best"
     )
@@ -217,12 +218,13 @@ async def extract_stream_url(link, video=False):
 
     try:
         command = [
-    "yt-dlp",
-    "--no-warnings",
-    "--no-playlist",
-    "--extractor-args",
-    "youtube:player_client=android",
-]
+            "yt-dlp",
+            "--no-warnings",
+            "--no-playlist",
+            "--extractor-args",
+            "youtube:player_client=android",
+        ]
+
         # Check the cookies file without logging cookie values.
         if os.path.isfile(YOUTUBE_COOKIES_FILE):
             size = os.path.getsize(YOUTUBE_COOKIES_FILE)
@@ -274,9 +276,7 @@ async def extract_stream_url(link, video=False):
             )
 
             command.extend(["--cookies", writable_cookies])
-            LOGGER.info(
-                "YouTube cookies copied to temporary file."
-            )
+            LOGGER.info("YouTube cookies copied to temporary file.")
 
         else:
             LOGGER.warning(
@@ -303,12 +303,14 @@ async def extract_stream_url(link, video=False):
 
         error = stderr.decode("utf-8", errors="replace")
 
-        # Retry with a broader format if the requested one is unavailable.
+        # Retry with a broader format if the requested format is unavailable.
         if "Requested format is not available" in error:
             retry_command = [
                 "yt-dlp",
                 "--no-warnings",
                 "--no-playlist",
+                "--extractor-args",
+                "youtube:player_client=android",
             ]
 
             if temp_dir:
