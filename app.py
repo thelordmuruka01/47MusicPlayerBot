@@ -222,12 +222,41 @@ async def extract_stream_url(link, video=False):
         ]
 
         if os.path.isfile(YOUTUBE_COOKIES_FILE):
-            temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
-            writable_cookies = os.path.join(temp_dir, "cookies.txt")
-            shutil.copyfile(YOUTUBE_COOKIES_FILE, writable_cookies)
+    size = os.path.getsize(YOUTUBE_COOKIES_FILE)
 
-            command.extend(["--cookies", writable_cookies])
-            LOGGER.info("YouTube cookies copied to writable temporary file.")
+    if size < 100:
+        LOGGER.warning(
+            "YouTube cookies file looks suspiciously small: %d bytes",
+            size,
+        )
+    else:
+        LOGGER.info(
+            "YouTube cookies file found: %s (%d bytes)",
+            YOUTUBE_COOKIES_FILE,
+            size,
+        )
+
+    temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
+    writable_cookies = os.path.join(temp_dir, "cookies.txt")
+
+    shutil.copyfile(
+        YOUTUBE_COOKIES_FILE,
+        writable_cookies,
+    )
+
+    command.extend([
+        "--cookies",
+        writable_cookies,
+    ])
+
+    LOGGER.info(
+        "YouTube cookies copied to writable temporary file."
+    )
+else:
+    LOGGER.warning(
+        "YouTube cookies file not found: %s",
+        YOUTUBE_COOKIES_FILE,
+    )
         else:
             LOGGER.warning("YouTube cookies file not found: %s", YOUTUBE_COOKIES_FILE)
 
