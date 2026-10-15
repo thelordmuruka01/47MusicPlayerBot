@@ -1,5 +1,5 @@
 flask==3.0.3
-pyrogram==1.4.16
+Pyrogram==2.0.106
 tgcrypto
 py-tgcalls==0.8.6
 youtube_search
