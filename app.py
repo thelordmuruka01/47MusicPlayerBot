@@ -1,11 +1,10 @@
-
-
 import os
 import glob
 import json
 import logging
 import asyncio
 import youtube_dl
+from flask import Flask
 from pytgcalls import StreamType
 from pytube import YouTube
 from youtube_search import YoutubeSearch
@@ -25,6 +24,17 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQ
 from helpers.queues import QUEUE, add_to_queue, get_queue, clear_queue, pop_an_item
 from helpers.admin_check import *
 
+# 1. Flask setup with multi-method support for Render health checks
+app = Flask(__name__)
+
+@app.route('/', methods=['GET', 'POST', 'HEAD'])
+def health_check():
+    return "Bot is alive!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    # host='0.0.0.0' is mandatory for Render/Koyeb/Heroku
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 bot = Client(
     "Music Stream Bot",
     bot_token = os.environ["BOT_TOKEN"],
