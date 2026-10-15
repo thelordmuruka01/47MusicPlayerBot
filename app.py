@@ -219,50 +219,51 @@ ydl_opts = {
     "noplaylist": True,
 }
 
+
 async def extract_stream_url(link, video=False):
-    """Extract a playable YouTube stream URL with format fallbacks."""
+    """Extract a playable YouTube stream URL."""
 
     temp_dir = None
 
     try:
-        # Do not force the Android player client.
-        # Let yt-dlp choose the available YouTube clients.
-        
-    base_command = [
-    "yt-dlp",
-    "--no-warnings",
-    "--no-playlist",
-    "--socket-timeout", "20",
-    "--retries", "2",
-]
+        base_command = [
+            "yt-dlp",
+            "--no-warnings",
+            "--no-playlist",
+            "--socket-timeout", "20",
+            "--retries", "2",
+            "--extractor-args",
+            "youtube:player_client=web_safari",
+        ]
 
-# Try an alternative YouTube player client
-base_command.extend([
-    "--extractor-args",
-    "youtube:player_client=web_safari",
-])
+        if os.path.isfile(YOUTUBE_COOKIES_FILE):
+            temp_dir = tempfile.mkdtemp(
+                prefix="ytcookies_"
+            )
+            writable_cookies = os.path.join(
+                temp_dir, "cookies.txt"
+            )
 
-if os.path.isfile(YOUTUBE_COOKIES_FILE):
-    temp_dir = tempfile.mkdtemp(prefix="ytcookies_")
-    writable_cookies = os.path.join(
-        temp_dir, "cookies.txt"
-    )
+            shutil.copyfile(
+                YOUTUBE_COOKIES_FILE,
+                writable_cookies,
+            )
 
-    shutil.copyfile(
-        YOUTUBE_COOKIES_FILE,
-        writable_cookies,
-    )
+            base_command.extend([
+                "--cookies", writable_cookies
+            ])
 
-    base_command.extend([
-        "--cookies", writable_cookies
-    ])
+            LOGGER.info(
+                "YouTube cookies loaded for extraction."
+            )
+        else:
+            LOGGER.warning(
+                "YouTube cookies file not found: %s",
+                YOUTUBE_COOKIES_FILE,
+            )
 
-    LOGGER.info("YouTube cookies loaded for extraction.")
-else:
-    LOGGER.warning(
-        "YouTube cookies file not found: %s",
-        YOUTUBE_COOKIES_FILE,
-    )
+        # Keep your existing selector retry loop here.
+
 
         # Each selector is tried separately.
         # For video playback, prefer a single combined format.
